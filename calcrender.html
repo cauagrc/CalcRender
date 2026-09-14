@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CalcRender — Iluminação e Geometria Diferencial</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root{
+    --bg: #0d1013;
+    --panel: #14181c;
+    --panel-line: #262c31;
+    --ink: #e7ebee;
+    --ink-dim: #8b959d;
+    --amber: #e8a33d;
+    --teal: #49c9b8;
+    --violet: #8f8bf0;
+    --mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+    --sans: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  }
+  @font-face{ font-family:'Space Grotesk'; src: local('Space Grotesk'); }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0; width:100%; height:100%; overflow:hidden;
+    background: var(--bg); color: var(--ink);
+    font-family: var(--sans);
+  }
+  #app{ position:relative; width:100vw; height:100vh; }
+  #canvas-holder{ position:absolute; inset:0; }
+  canvas{ display:block; touch-action:none; }
+
+  /* ---- Header ---- */
+  #header{
+    position:absolute; top:0; left:0; right:0;
+    display:flex; align-items:baseline; justify-content:space-between;
+    padding: 18px 26px 0 26px; pointer-events:none;
+    z-index: 5;
+  }
+  #header h1{
+    font-size: 20px; font-weight: 600; letter-spacing: 0.2px; margin:0;
+    color: var(--ink);
+  }
+  #header h1 span{ color: var(--amber); }
+  #header p{
+    margin: 2px 0 0 0; font-size: 12.5px; color: var(--ink-dim);
+    font-family: var(--mono);
+  }
+
+  /* ---- Side panel ---- */
+  #panel{
+    position:absolute; top: 0; right: 0; height: 100%;
+    width: 348px; background: linear-gradient(180deg, rgba(20,24,28,0.94), rgba(20,24,28,0.98));
+    border-left: 1px solid var(--panel-line);
+    padding: 84px 22px 22px 22px;
+    overflow-y: auto;
+    z-index: 4;
+    backdrop-filter: blur(6px);
+  }
+  #panel::-webkit-scrollbar{ width:6px; }
+  #panel::-webkit-scrollbar-thumb{ background: #333b41; border-radius: 3px; }
+
+  .block{ margin-bottom: 26px; }
+  .block-title{
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1.4px;
+    color: var(--ink-dim); margin: 0 0 12px 0; font-weight: 600;
+  }
+
+  .row{ display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px; gap: 10px;}
+  .row label{ font-size: 13px; color: var(--ink); flex: 0 0 auto; }
+  .row .val{ font-family: var(--mono); font-size: 12px; color: var(--amber); min-width: 44px; text-align:right; }
+  input[type=range]{
+    flex: 1 1 auto; -webkit-appearance:none; height: 3px; background: #2b3238; border-radius: 2px; outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:13px; height:13px; border-radius:50%;
+    background: var(--amber); cursor:pointer; border: 2px solid #0d1013;
+  }
+
+  .fn-grid{ display:flex; flex-direction:column; gap:6px; }
+  .fn-btn{
+    text-align:left; padding: 9px 12px; background: #1a1f24; border: 1px solid var(--panel-line);
+    color: var(--ink-dim); font-family: var(--sans); font-size: 13px; border-radius: 6px; cursor:pointer;
+    transition: border-color .15s, color .15s;
+  }
+  .fn-btn:hover{ color: var(--ink); }
+  .fn-btn.active{ border-color: var(--amber); color: var(--ink); background: #201a12; }
+
+  .toggle-row{
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 9px 0;
+  }
+  .switch{
+    position:relative; width: 38px; height: 20px; background:#2b3238; border-radius: 10px; cursor:pointer;
+    flex-shrink:0;
+  }
+  .switch .knob{
+    position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%;
+    background: var(--ink-dim); transition: left .15s, background .15s;
+  }
+  .switch.on{ background:#39301c; }
+  .switch.on .knob{ left:20px; background: var(--amber); }
+
+  /* ---- Readout card ---- */
+  #readout{
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.85;
+    background: #101315; border: 1px solid var(--panel-line); border-radius: 8px;
+    padding: 14px 16px;
+  }
+  #readout .line{ display:flex; justify-content:space-between; }
+  #readout .k{ color: var(--ink-dim); }
+  #readout .v{ color: var(--ink); }
+  #readout .v.hi{ color: var(--amber); }
+  #readout hr{ border: none; border-top: 1px solid var(--panel-line); margin: 8px 0; }
+
+  .matrix{ display:flex; align-items:center; gap:8px; margin-top:4px; }
+  .matrix .bracket{ font-size: 26px; color: var(--ink-dim); font-weight:200; }
+  .matrix table{ border-collapse:collapse; }
+  .matrix td{ padding: 2px 10px; text-align:center; color: var(--ink); }
+
+  #classify{
+    display:inline-flex; align-items:center; gap:7px; padding: 4px 10px; border-radius: 20px;
+    font-family: var(--sans); font-size: 12.5px; font-weight:600; margin-top: 2px;
+  }
+  #classify .dot{ width:8px; height:8px; border-radius:50%; }
+
+  /* ---- Legend ---- */
+  #legend{
+    position:absolute; left: 26px; bottom: 24px; z-index: 5;
+    display:flex; gap: 18px; font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim);
+  }
+  #legend .item{ display:flex; align-items:center; gap:6px; }
+  #legend .sw{ width:10px; height:10px; border-radius: 2px; }
+
+  #hint{
+    position:absolute; left:26px; top: 70px; z-index:5;
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim);
+    opacity: 0.85;
+  }
+
+  @media (max-width: 820px){
+    #panel{ width: 100%; height: 46%; top: auto; bottom:0; border-left:none; border-top:1px solid var(--panel-line); padding-top:18px;}
+    #canvas-holder{ bottom: 46%; }
+    #legend{ display:none; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="canvas-holder"></div>
+
+  <div id="header">
+    <div>
+      <h1>Calc<span>Render</span></h1>
+      <p>plano tangente · vetor normal · matriz hessiana</p>
+    </div>
+  </div>
+
+  <div id="hint">arraste para girar · scroll para zoom</div>
+
+  <div id="legend">
+    <div class="item"><span class="sw" style="background:#e8734a"></span>pico (máx. local)</div>
+    <div class="item"><span class="sw" style="background:#4fb8d9"></span>vale (mín. local)</div>
+    <div class="item"><span class="sw" style="background:#8f8bf0"></span>sela</div>
+  </div>
+
+  <div id="panel">
+
+    <div class="block">
+      <p class="block-title">Superfície z = f(x, y)</p>
+      <div class="fn-grid" id="fn-grid"></div>
+    </div>
+
+    <div class="block">
+      <p class="block-title">Ponto analisado</p>
+      <div class="row"><label>x₀</label><input id="px" type="range" min="-3.6" max="3.6" step="0.02" value="0.9"><span class="val" id="px-val"></span></div>
+      <div class="row"><label>y₀</label><input id="py" type="range" min="-3.6" max="3.6" step="0.02" value="0.7"><span class="val" id="py-val"></span></div>
+    </div>
+
+    <div class="block">
+      <p class="block-title">Iluminação</p>
+      <div class="row"><label>azimute</label><input id="light-az" type="range" min="0" max="360" step="1" value="35"><span class="val" id="light-az-val"></span></div>
+      <div class="row"><label>elevação</label><input id="light-el" type="range" min="5" max="85" step="1" value="42"><span class="val" id="light-el-val"></span></div>
+      <div class="row"><label>intensidade</label><input id="light-int" type="range" min="0" max="3" step="0.05" value="1.4"><span class="val" id="light-int-val"></span></div>
+
+      <div class="toggle-row">
+        <label style="font-size:13px;">sombreamento via ∇f (normal real)</label>
+        <div class="switch on" id="toggle-normal"><div class="knob"></div></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <p class="block-title">Mapa de curvatura (Hessiana)</p>
+      <div class="toggle-row">
+        <label style="font-size:13px;">colorir por classificação</label>
+        <div class="switch on" id="toggle-curv"><div class="knob"></div></div>
+      </div>
+      <div class="toggle-row">
+        <label style="font-size:13px;">mostrar plano tangente</label>
+        <div class="switch on" id="toggle-plane"><div class="knob"></div></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <p class="block-title">Leitura no ponto (x₀, y₀)</p>
+      <div id="readout"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function(){
+
+/* =========================================================
+   1. FUNÇÕES DE SUPERFÍCIE E DERIVADAS ANALÍTICAS
+   ========================================================= */
+const FUNCTIONS = [
+  {
+    id: 'ripple',
+    name: 'Ondulação  z = 1.4·sin(x)·cos(y)',
+    domain: 3.6,
+    f:   (x,y) => 1.4*Math.sin(x)*Math.cos(y),
+    fx:  (x,y) => 1.4*Math.cos(x)*Math.cos(y),
+    fy:  (x,y) => -1.4*Math.sin(x)*Math.sin(y),
+    fxx: (x,y) => -1.4*Math.sin(x)*Math.cos(y),
+    fxy: (x,y) => -1.4*Math.cos(x)*Math.sin(y),
+    fyy: (x,y) => -1.4*Math.sin(x)*Math.cos(y),
+  },
+  {
+    id: 'bump',
+    name: 'Gaussiana  z = 2·e^-(x²+y²)/3',
+    domain: 3.6,
+    f:   (x,y) => 2*Math.exp(-(x*x+y*y)/3),
+    fx:  (x,y) => 2*Math.exp(-(x*x+y*y)/3) * (-2*x/3),
+    fy:  (x,y) => 2*Math.exp(-(x*x+y*y)/3) * (-2*y/3),
+    fxx: (x,y) => { const g=2*Math.exp(-(x*x+y*y)/3); return g*((4*x*x/9) - 2/3); },
+    fxy: (x,y) => { const g=2*Math.exp(-(x*x+y*y)/3); return g*(4*x*y/9); },
+    fyy: (x,y) => { const g=2*Math.exp(-(x*x+y*y)/3); return g*((4*y*y/9) - 2/3); },
+  },
+  {
+    id: 'saddle',
+    name: 'Sela hiperbólica  z = (x²−y²)/4',
+    domain: 3.6,
+    f:   (x,y) => (x*x - y*y)/4,
+    fx:  (x,y) => x/2,
+    fy:  (x,y) => -y/2,
+    fxx: (x,y) => 0.5,
+    fxy: (x,y) => 0,
+    fyy: (x,y) => -0.5,
+  },
+];
+let current = FUNCTIONS[0];
+
+/* =========================================================
+   2. CENA THREE.JS
+   ========================================================= */
+const holder = document.getElementById('canvas-holder');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d1013);
+scene.fog = new THREE.Fog(0x0d1013, 12, 26);
+
+const camera = new THREE.PerspectiveCamera(42, holder.clientWidth/holder.clientHeight, 0.1, 100);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(holder.clientWidth, holder.clientHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+holder.appendChild(renderer.domElement);
+
+// grade de referência sutil
+const grid = new THREE.GridHelper(8, 16, 0x2a3238, 0x1c2126);
+grid.position.y = -1.55;
+scene.add(grid);
+
+const ambient = new THREE.AmbientLight(0x8892a0, 0.55);
+scene.add(ambient);
+
+const keyLight = new THREE.PointLight(0xfff2d9, 1.4, 0, 2);
+scene.add(keyLight);
+const lightMarker = new THREE.Mesh(
+  new THREE.SphereGeometry(0.09, 16, 16),
+  new THREE.MeshBasicMaterial({ color: 0xffe3a3 })
+);
+scene.add(lightMarker);
+
+/* ---- câmera orbital manual (sem dependências externas) ---- */
+let camAzimuth = 0.9, camElevation = 0.55, camRadius = 8.5;
+function updateCamera(){
+  const ce = Math.cos(camElevation), se = Math.sin(camElevation);
+  camera.position.set(
+    camRadius*ce*Math.sin(camAzimuth),
+    camRadius*se + 0.4,
+    camRadius*ce*Math.cos(camAzimuth)
+  );
+  camera.lookAt(0,0.1,0);
+}
+updateCamera();
+
+let dragging=false, lastX=0, lastY=0;
+renderer.domElement.addEventListener('pointerdown', e=>{ dragging=true; lastX=e.clientX; lastY=e.clientY; });
+window.addEventListener('pointerup', ()=> dragging=false);
+window.addEventListener('pointermove', e=>{
+  if(!dragging) return;
+  const dx = e.clientX-lastX, dy = e.clientY-lastY;
+  lastX=e.clientX; lastY=e.clientY;
+  camAzimuth -= dx*0.005;
+  camElevation = Math.max(0.08, Math.min(1.45, camElevation + dy*0.005));
+  updateCamera();
+});
+renderer.domElement.addEventListener('wheel', e=>{
+  e.preventDefault();
+  camRadius = Math.max(3.5, Math.min(18, camRadius + e.deltaY*0.01));
+  updateCamera();
+}, { passive:false });
+
+/* =========================================================
+   3. CLASSIFICAÇÃO POR HESSIANA -> COR
+   ========================================================= */
+const COL_PEAK   = new THREE.Color(0xe8734a);
+const COL_VALLEY = new THREE.Color(0x4fb8d9);
+const COL_SADDLE = new THREE.Color(0x8f8bf0);
+const COL_FLAT   = new THREE.Color(0x5b6570);
+
+function classifyColor(fn, x, y, out){
+  const fxx = fn.fxx(x,y), fxy = fn.fxy(x,y), fyy = fn.fyy(x,y);
+  const D = fxx*fyy - fxy*fxy;
+  const strength = Math.min(1, Math.abs(D)*2.2);
+  let target;
+  if (D > 1e-4) target = (fxx < 0) ? COL_PEAK : COL_VALLEY;
+  else if (D < -1e-4) target = COL_SADDLE;
+  else target = COL_FLAT;
+  out.copy(COL_FLAT).lerp(target, strength);
+  return { fxx, fxy, fyy, D };
+}
+
+/* =========================================================
+   4. GEOMETRIA DA SUPERFÍCIE (normais analíticas via ∇f)
+   ========================================================= */
+const RES = 90;
+let surfMesh, surfGeom;
+const worldScale = 1.7; // domínio -> unidades de cena
+
+function buildSurface(fn){
+  if(surfMesh){ scene.remove(surfMesh); surfGeom.dispose(); surfMesh.material.dispose(); }
+
+  const N = RES;
+  const dom = fn.domain;
+  const positions = new Float32Array(N*N*3);
+  const normalsAnalytic = new Float32Array(N*N*3);
+  const normalsFlatFake = new Float32Array(N*N*3);
+  const colorsFlat = new Float32Array(N*N*3);
+  const colorsCurv = new Float32Array(N*N*3);
+
+  const tmpColor = new THREE.Color();
+  const baseColor = new THREE.Color(0x9aa7ad);
+
+  for(let j=0;j<N;j++){
+    for(let i=0;i<N;i++){
+      const u = i/(N-1), v = j/(N-1);
+      const x = (u*2-1)*dom, y = (v*2-1)*dom;
+      const z = fn.f(x,y);
+      const idx = (j*N+i)*3;
+
+      positions[idx]   = x*worldScale/dom*1.9;
+      positions[idx+1] = z;
+      positions[idx+2] = y*worldScale/dom*1.9;
+
+      const fx = fn.fx(x,y), fy = fn.fy(x,y);
+      const nrm = new THREE.Vector3(-fx, 1, -fy).normalize();
+      normalsAnalytic[idx]=nrm.x; normalsAnalytic[idx+1]=nrm.y; normalsAnalytic[idx+2]=nrm.z;
+      normalsFlatFake[idx]=0; normalsFlatFake[idx+1]=1; normalsFlatFake[idx+2]=0;
+
+      colorsFlat[idx]=baseColor.r; colorsFlat[idx+1]=baseColor.g; colorsFlat[idx+2]=baseColor.b;
+      classifyColor(fn, x, y, tmpColor);
+      colorsCurv[idx]=tmpColor.r; colorsCurv[idx+1]=tmpColor.g; colorsCurv[idx+2]=tmpColor.b;
+    }
+  }
+
+  const indices = [];
+  for(let j=0;j<N-1;j++){
+    for(let i=0;i<N-1;i++){
+      const a=j*N+i, b=j*N+i+1, c=(j+1)*N+i, d=(j+1)*N+i+1;
+      indices.push(a,c,b, b,c,d);
+    }
+  }
+
+  surfGeom = new THREE.BufferGeometry();
+  surfGeom.setIndex(indices);
+  surfGeom.setAttribute('position', new THREE.BufferAttribute(positions,3));
+  surfGeom.setAttribute('normal', new THREE.BufferAttribute(normalsAnalytic.slice(),3));
+  surfGeom.setAttribute('color', new THREE.BufferAttribute(colorsCurv.slice(),3));
+
+  surfGeom.userData = { normalsAnalytic, normalsFlatFake, colorsFlat, colorsCurv };
+
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 0.62, metalness: 0.04,
+    side: THREE.DoubleSide, flatShading: false
+  });
+  surfMesh = new THREE.Mesh(surfGeom, mat);
+  scene.add(surfMesh);
+}
+
+/* =========================================================
+   5. MARCADOR, VETOR NORMAL E PLANO TANGENTE
+   ========================================================= */
+const pointMarker = new THREE.Mesh(
+  new THREE.SphereGeometry(0.065, 20, 20),
+  new THREE.MeshBasicMaterial({ color: 0xffffff })
+);
+scene.add(pointMarker);
+
+let normalArrow = new THREE.ArrowHelper(new THREE.Vector3(0,1,0), new THREE.Vector3(), 1, 0xe8a33d, 0.22, 0.11);
+scene.add(normalArrow);
+
+const planeGeom = new THREE.PlaneGeometry(1.4, 1.4, 1, 1);
+const planeMat = new THREE.MeshStandardMaterial({
+  color: 0x49c9b8, transparent: true, opacity: 0.28, side: THREE.DoubleSide,
+  roughness: 0.4, metalness: 0
+});
+const tangentPlane = new THREE.Mesh(planeGeom, planeMat);
+scene.add(tangentPlane);
+const planeWire = new THREE.LineSegments(
+  new THREE.EdgesGeometry(planeGeom),
+  new THREE.LineBasicMaterial({ color: 0x49c9b8, transparent:true, opacity:0.75 })
+);
+tangentPlane.add(planeWire);
+
+function updatePointVisuals(){
+  const fn = current;
+  const dom = fn.domain;
+  const px = parseFloat(document.getElementById('px').value);
+  const py = parseFloat(document.getElementById('py').value);
+  const x = Math.max(-dom, Math.min(dom, px));
+  const y = Math.max(-dom, Math.min(dom, py));
+  const z = fn.f(x,y);
+  const fx = fn.fx(x,y), fy = fn.fy(x,y);
+  const sceneScale = worldScale/dom*1.9;
+
+  const wx = x*sceneScale, wy = z, wz = y*sceneScale;
+  pointMarker.position.set(wx, wy, wz);
+
+  const n = new THREE.Vector3(-fx, 1, -fy).normalize();
+  normalArrow.position.set(wx, wy, wz);
+  normalArrow.setDirection(n);
+  normalArrow.setLength(1.05, 0.2, 0.1);
+
+  // orientar o plano tangente segundo a normal
+  tangentPlane.position.set(wx, wy, wz);
+  const up = new THREE.Vector3(0,0,1);
+  const quat = new THREE.Quaternion().setFromUnitVectors(up, n);
+  tangentPlane.setRotationFromQuaternion(quat);
+
+  const hess = classifyColor(fn, x, y, new THREE.Color());
+  const D = hess.D;
+  let label, color;
+  if (D > 1e-4) { label = hess.fxx < 0 ? 'PICO (máximo local)' : 'VALE (mínimo local)'; color = hess.fxx<0 ? '#e8734a':'#4fb8d9'; }
+  else if (D < -1e-4) { label = 'PONTO DE SELA'; color = '#8f8bf0'; }
+  else { label = 'INCONCLUSIVO (D ≈ 0)'; color = '#5b6570'; }
+
+  document.getElementById('px-val').textContent = x.toFixed(2);
+  document.getElementById('py-val').textContent = y.toFixed(2);
+
+  document.getElementById('readout').innerHTML = `
+    <div class="line"><span class="k">f(x₀,y₀)</span><span class="v hi">${z.toFixed(3)}</span></div>
+    <div class="line"><span class="k">∂f/∂x</span><span class="v">${fx.toFixed(3)}</span></div>
+    <div class="line"><span class="k">∂f/∂y</span><span class="v">${fy.toFixed(3)}</span></div>
+    <hr>
+    <div class="line"><span class="k">N</span><span class="v">(${(-fx).toFixed(2)}, ${(-fy).toFixed(2)}, 1)</span></div>
+    <hr>
+    <div class="line"><span class="k">Hessiana H</span><span class="v"></span></div>
+    <div class="matrix">
+      <span class="bracket">[</span>
+      <table>
+        <tr><td>${hess.fxx.toFixed(2)}</td><td>${hess.fxy.toFixed(2)}</td></tr>
+        <tr><td>${hess.fxy.toFixed(2)}</td><td>${hess.fyy.toFixed(2)}</td></tr>
+      </table>
+      <span class="bracket">]</span>
+    </div>
+    <div class="line" style="margin-top:8px;"><span class="k">det(H)</span><span class="v">${D.toFixed(3)}</span></div>
+    <div id="classify" style="background:${color}22; color:${color}; margin-top:10px;">
+      <span class="dot" style="background:${color}"></span>${label}
+    </div>
+  `;
+}
+
+/* =========================================================
+   6. UI — construção dos controles
+   ========================================================= */
+const fnGrid = document.getElementById('fn-grid');
+FUNCTIONS.forEach(fn=>{
+  const btn = document.createElement('div');
+  btn.className = 'fn-btn' + (fn===current ? ' active' : '');
+  btn.textContent = fn.name;
+  btn.onclick = () => {
+    current = fn;
+    document.querySelectorAll('.fn-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('px').min = -fn.domain; document.getElementById('px').max = fn.domain;
+    document.getElementById('py').min = -fn.domain; document.getElementById('py').max = fn.domain;
+    buildSurface(fn);
+    applyNormalMode(); applyCurvMode();
+    updatePointVisuals();
+  };
+  fnGrid.appendChild(btn);
+});
+
+function bindSlider(id, fmt, onChange){
+  const el = document.getElementById(id);
+  const disp = document.getElementById(id+'-val');
+  const update = () => { disp.textContent = fmt(parseFloat(el.value)); onChange(parseFloat(el.value)); };
+  el.addEventListener('input', update);
+  update();
+}
+
+let showNormalShading = true, showCurvColor = true, showPlane = true;
+
+function applyNormalMode(){
+  const geom = surfGeom;
+  const arr = showNormalShading ? geom.userData.normalsAnalytic : geom.userData.normalsFlatFake;
+  geom.setAttribute('normal', new THREE.BufferAttribute(arr.slice(), 3));
+}
+function applyCurvMode(){
+  const geom = surfGeom;
+  const arr = showCurvColor ? geom.userData.colorsCurv : geom.userData.colorsFlat;
+  geom.setAttribute('color', new THREE.BufferAttribute(arr.slice(), 3));
+}
+
+function setupToggle(id, initial, onChange){
+  const el = document.getElementById(id);
+  let state = initial;
+  const render = () => el.classList.toggle('on', state);
+  render();
+  el.addEventListener('click', ()=>{ state = !state; render(); onChange(state); });
+}
+
+setupToggle('toggle-normal', true, v => { showNormalShading = v; applyNormalMode(); });
+setupToggle('toggle-curv', true, v => { showCurvColor = v; applyCurvMode(); });
+setupToggle('toggle-plane', true, v => {
+  showPlane = v; tangentPlane.visible = v; normalArrow.visible = v;
+});
+
+bindSlider('px', v=>v.toFixed(2), updatePointVisuals);
+bindSlider('py', v=>v.toFixed(2), updatePointVisuals);
+
+let lightAz = 35*Math.PI/180, lightEl = 42*Math.PI/180, lightIntensity = 1.4;
+function updateLight(){
+  const r = 5.5;
+  keyLight.position.set(
+    r*Math.cos(lightEl)*Math.sin(lightAz),
+    r*Math.sin(lightEl)+1,
+    r*Math.cos(lightEl)*Math.cos(lightAz)
+  );
+  keyLight.intensity = lightIntensity;
+  lightMarker.position.copy(keyLight.position);
+}
+bindSlider('light-az', v=>v.toFixed(0)+'°', v=>{ lightAz=v*Math.PI/180; updateLight(); });
+bindSlider('light-el', v=>v.toFixed(0)+'°', v=>{ lightEl=v*Math.PI/180; updateLight(); });
+bindSlider('light-int', v=>v.toFixed(2), v=>{ lightIntensity=v; updateLight(); });
+
+/* =========================================================
+   7. INICIALIZAÇÃO E LOOP
+   ========================================================= */
+buildSurface(current);
+applyNormalMode(); applyCurvMode();
+updateLight();
+updatePointVisuals();
+
+window.addEventListener('resize', ()=>{
+  camera.aspect = holder.clientWidth/holder.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(holder.clientWidth, holder.clientHeight);
+});
+
+function animate(){
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
+animate();
+
+})();
+</script>
+</body>
+</html>
