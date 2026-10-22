@@ -6,16 +6,12 @@
 #include <cstdlib>
 
 struct Engine {
-    // Ponteiro para a janela.
     GLFWwindow* window;
     // Dimensões iniciais da janela, em pixels.
     int WIDTH = 1200;
     int HEIGHT = 720;
 
-    // Construtor: executado automaticamente quando criamos um Engine.
     Engine() {
-        // Os parênteses são necessários para CHAMAR glfwInit().
-        // Se a inicialização falhar, encerramos o programa.
         if (!glfwInit()) {
             std::cerr << "Erro ao inicializar o GLFW.\n";
             std::exit(EXIT_FAILURE);
@@ -47,8 +43,6 @@ struct Engine {
         // Os comandos gráficos passam a utilizar esse contexto.
         glfwMakeContextCurrent(window);
 
-        // Solicita ao GLEW que tente carregar também funções
-        // que não sejam anunciadas da maneira esperada pelo driver.
         glewExperimental = GL_TRUE;
 
         const GLenum glewErr = glewInit();
@@ -67,15 +61,11 @@ struct Engine {
         }
 
         // Solicita sincronização da apresentação com a tela.
-        // Precisa ser chamado depois de selecionar o contexto.
         glfwSwapInterval(1);
     }
 
-    // Prepara o desenho de UM quadro.
     void run() {
-        // Define a cor usada na limpeza:
-        // vermelho = 0, verde = 0, azul = 0, alfa = 1.
-        // O resultado é preto, com alfa totalmente opaco.
+        // Cria um cor: cor preta. Para a tela.
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
         // Limpa o buffer de cor utilizando a cor definida acima.
@@ -85,15 +75,14 @@ struct Engine {
 
 int main() {
 
-    // Repete enquanto a janela não tiver uma solicitação de fechamento.
     while (!glfwWindowShouldClose(engine.window)) {
         // Prepara um quadro com o fundo preto.
         engine.run();
 
-        // Apresenta o quadro que acabamos de preparar.
+        // Inicializa o quadro.
         glfwSwapBuffers(engine.window);
 
-        // Processa os eventos da janela, como o clique no botão X.
+        // Processa os eventos da janela.
         glfwPollEvents();
     }
 
