@@ -125,6 +125,27 @@ struct Circle {
     // Desenha o círculo utilizando vários triângulos.
     void draw() {
 
+        glColor3f(1.0f, 1.0f, 1.0f);
+        glLineWidth(2.0f);
+
+        int numeroDeLinhas = 12;
+
+        glBegin(GL_LINES);
+
+        for(int i=0; i<numeroDeLinhas; i++){
+          float angle = 2.0f * M_PI * i / numeroDeLinhas;
+
+          float x1 = position.x;
+          float y1 = position.y;
+
+          float x2 = cos(angle) * radius * 1.5f + x1;
+          float y2 = sin(angle) * radius * 1.5f + y1;
+
+          glVertex2f(x1,y1);
+          glVertex2f(x2,y2);
+        }
+
+        glEnd();
         // Define a cor do círculo como vermelho.
         glColor3f(1.0f, 0.0f, 0.0f);
 
@@ -152,6 +173,7 @@ struct Circle {
 
         // Termina a definição dos triângulos.
         glEnd();
+
     }
 };
 
@@ -162,7 +184,7 @@ struct Circle {
 
 // Cria o motor gráfico e um círculo com centro em (0, 0).
 Engine engine;
-Circle circle(vec2(0.0f, 0.0f));
+Circle circle(vec2(0.0f, 100.0f));
 
 
 // ============================================================
