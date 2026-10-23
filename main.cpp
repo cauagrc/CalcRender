@@ -177,14 +177,50 @@ struct Circle {
     }
 };
 
+// ============================================================
+// RAIO DE LUZ 
+// Representa os raios de luz que serao
+// usados para o calculo de Lambert
+// ============================================================
+struct Raio{
+  double x; double y;
+  vec2 dir;
+  vector<vec2> trail;
+
+  Raio(vec2(pos), vec2(dir)) : x(pos.x), y(pos.y), dir(dir){trail.push_back(pos);}
+
+  void draw(){
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glLineWidth(1.0f);
+
+    size_t N = trail.size();
+    if(N<2) return;
+
+    glBegin(GL_LINE_STRIP);
+    for(size_t i=0; i<N; i++){
+      float alpha = float(i) / float(N-1);
+      glColor4f(1.0f,1.0f,1.0f, std::max(alpha, 0.05f));
+      glVertex2f(trail[i].x, trail[i].y);
+    }
+    glEnd();
+  }
+
+  void step(){
+    x+=dir.x*4;
+    y+=dir.y*4;
+    trail.push_back({x,y});
+  }
+};
 
 // ============================================================
 // OBJETOS GLOBAIS
 // ============================================================
 
-// Cria o motor gráfico e um círculo com centro em (0, 0).
+// Cria o motor gráfico, um círculo com centro em (0, 0) e raios de luzes.
+vector<Raio> raios;
 Engine engine;
-Circle circle(vec2(0.0f, 100.0f));
+Circle circle(vec2(0.0f, 0.0f));
 
 
 // ============================================================
@@ -193,6 +229,9 @@ Circle circle(vec2(0.0f, 100.0f));
 // ============================================================
 
 int main() {
+    for(float y = -engine.height; y<engine.height; y+=100){
+      raios.push_back(Raio(vec2(-engine.width, y), vec2(1.0,0.0)));
+    };
 
     // Mantém a aplicação em execução enquanto a janela
     // não receber um pedido de encerramento.
@@ -203,6 +242,11 @@ int main() {
 
         // Desenha o círculo.
         circle.draw();
+
+        for (auto& raio : raios){
+          raio.draw();
+          raio.step();
+        }
 
         // Apresenta o quadro desenhado na janela.
         glfwSwapBuffers(engine.window);
