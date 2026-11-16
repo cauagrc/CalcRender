@@ -1,9 +1,14 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 #include <algorithm>
 #include <cstdlib>
+#include <glm/trigonometric.hpp>
 #include <iostream>
 #include <vector>
 
@@ -60,6 +65,7 @@ struct Engine {
     glewExperimental = GL_TRUE;
 
     if (glewInit() != GLEW_OK) {
+      glEnable(GL_DEPTH_TEST);
       cerr << "Erro ao inicializar o GLEW.\n";
 
       glfwDestroyWindow(window);
@@ -73,26 +79,25 @@ struct Engine {
 
   // Prepara a tela antes de desenhar cada quadro.
   void run() {
+    int fbw, fbh;
+    glfwGetFramebufferSize(window, &fbw, &fbh);
+    if (fbh == 0)
+      fbh = 1;
+    glViewport(0, 0, fbw, fbh);
 
     // Define a cor de fundo como preto.
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
     // Limpa o buffer de cor.
-    glClear(GL_COLOR_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // Seleciona e reinicia a matriz de projeção.
+    mat4 proj = perspective(radians(60.0f), float(fbw), 10.0f, 10000.0f);
     glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
+    glLoadMatrixf(value_ptr(proj));
 
-    // Define uma projeção ortográfica.
-    // O eixo X vai de -1000 a 1000.
-    // O eixo Y vai de -600 a 600.
-    glOrtho(-width, width, -height, height, -1.0, 1.0);
-
-    // Reinicia a matriz utilizada para as transformações
-    // dos objetos que serão desenhados.
+    mat4 view = lookAt(vec3(0, 0, 1800), vec3(0), vec3(0, 1, 0));
     glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
+    glLoadMatrixf(value_ptr(view));
   }
 };
 
@@ -173,9 +178,7 @@ struct Raio {
   vec3 dir;
   vector<vec3> trail;
 
-  Raio(vec3 p, vec3 d) : pos(p), dir(normalize(d)) {
-    trail.push_back(pos);
-  }
+  Raio(vec3 p, vec3 d) : pos(p), dir(normalize(d)) { trail.push_back(pos); }
 
   void draw() {
     glEnable(GL_BLEND);
@@ -196,7 +199,7 @@ struct Raio {
   }
 
   void step() {
-    pos += dir*4.0f;
+    pos += dir * 4.0f;
     trail.push_back(pos);
   }
 };
@@ -217,7 +220,7 @@ Circle circle(vec3(0.0f));
 
 int main() {
   for (float y = -engine.height; y < engine.height; y += 100) {
-    raios.push_back(Raio(vec3(-engine.width, y, 0.0f), vec3(1.0f, 0.0f,0.0f)));
+    raios.push_back(Raio(vec3(-engine.width, y, 0.0f), vec3(1.0f, 0.0f, 0.0f)));
   };
 
   // Mantém a aplicação em execução enquanto a janela
