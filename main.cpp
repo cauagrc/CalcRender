@@ -148,21 +148,25 @@ struct Engine {
   }
 };
 
+static float lambert(vec3 normal, vec3 lightDir) {
+  return std::max(0.0f, dot(normal, -lightDir));
+}
+
 // ============================================================
 // CIRCLE
 // Representa um círculo e contém o método responsável
 // pelo seu desenho no ecrã.
 // ============================================================
 
-struct Circle {
+struct Sphere {
   vec3 position; // Posição do centro do círculo.
   double radius; // Raio do círculo.
 
   // Recebe a posição inicial e define o raio.
-  Circle(vec3 pos) : position(pos), radius(250) {}
+  Sphere(vec3 pos) : position(pos), radius(250) {}
 
   // Desenha o círculo utilizando vários triângulos.
-  void draw() {
+  void draw(vec3 lightDir) {
 
     glColor3f(1.0f, 1.0f, 1.0f);
     glLineWidth(2.0f);
@@ -215,7 +219,10 @@ struct Circle {
     glEnd();
     */
     const int stacks = 40, slices = 80;
-    glColor3f(1.0f, 0.2f, 0.2f);
+    //glColor3f(1.0f, 0.2f, 0.2f);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    glLineWidth(1.0f);
+
 
     for(int i = 0; i<stacks; i++) {
       float phi1 = M_PI * i / stacks;
@@ -228,9 +235,13 @@ struct Circle {
           float phi = (k == 0) ? phi1 : phi2;
           vec3 n(sin(phi)*cos(theta), cos(phi), sin(phi) * sin(theta));
           vec3 p = position + n * float(radius);
+          float light = 0.1f + 0.9f * lambert(n, lightDir);
+          vec3 c = vec3(1.0f, 0.2f, 0.2f) * light;
+          glColor3f(c.r, c.g, c.b);
           glVertex3f(p.x, p.y, p.z);
         }
       }
+      glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
       glEnd();
     }
   }
@@ -281,7 +292,7 @@ struct Raio {
 // Cria o motor gráfico, um círculo com centro em (0, 0) e raios de luzes.
 vector<Raio> raios;
 Engine engine;
-Circle circle(vec3(0.0f));
+Sphere sphere(vec3(0.0f));
 
 // ============================================================
 // MAIN
@@ -298,6 +309,7 @@ int main() {
     for(float z=-400; z<=400; z+=100)
       raios.push_back(Raio(vec3(-engine.width, y, z), vec3(1.0f, 0.0f, 0.0f)));
 
+  vec3 lightDir(1.0f, 0.0f, 0.0f);
   // Mantém a aplicação em execução enquanto a janela
   // não receber um pedido de encerramento.
   while (!glfwWindowShouldClose(engine.window)) {
@@ -306,7 +318,7 @@ int main() {
     engine.run();
 
     // Desenha o círculo.
-    circle.draw();
+    sphere.draw(lightDir);
 
     for (auto &raio : raios) {
       raio.draw();
