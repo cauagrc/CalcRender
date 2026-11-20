@@ -289,9 +289,14 @@ Circle circle(vec3(0.0f));
 // ============================================================
 
 int main() {
+  /*
   for (float y = -engine.height; y < engine.height; y += 100) {
     raios.push_back(Raio(vec3(-engine.width, y, 0.0f), vec3(1.0f, 0.0f, 0.0f)));
   };
+  */
+  for(float y=-400; y<=400; y+=100)
+    for(float z=-400; z<=400; z+=100)
+      raios.push_back(Raio(vec3(-engine.width, y, z), vec3(1.0f, 0.0f, 0.0f)));
 
   // Mantém a aplicação em execução enquanto a janela
   // não receber um pedido de encerramento.
