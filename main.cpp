@@ -194,13 +194,13 @@ struct Engine {
     // Define a cor de fundo como preto.
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-    // TESTE VISUAL: troca o fundo preto por cinza.
+    // troca o fundo preto por cinza.
     // glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
 
     // Limpa o buffer de cor.
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // TESTE VISUAL: mostra também o que está atrás da esfera.
+    // mostra também o que está atrás da esfera.
     // glDisable(GL_DEPTH_TEST);
 
     float aspect = float(fbw) / fbh;
@@ -213,7 +213,7 @@ struct Engine {
       10000.0f
     );
 
-    // TESTE VISUAL: aproxima a imagem sem mover a câmera.
+    // aproxima a imagem sem mover a câmera.
     // proj = perspective(radians(25.0f), aspect, 5.0f, 10000.0f);
 
     glMatrixMode(GL_PROJECTION);
@@ -235,6 +235,83 @@ static float lambert(vec3 normal, vec3 lightDir) {
 }
 
 // ============================================================
+// ILUMINAÇÃO
+// Ajusta a claridade e o brilho das superfícies.
+// ============================================================
+
+// Claridade nas partes sem luz direta.
+const float LUZ_AMBIENTE = 0.15f;
+
+// Força da fonte de luz.
+const float INTENSIDADE_LUZ = 1.0f;
+
+// Quanto o material responde à luz difusa.
+const float DIFUSA_MATERIAL = 0.82f;
+
+// Força da mancha de brilho. Use 0.0f para removê-la.
+const float ESPECULAR_MATERIAL = 0.65f;
+
+// Valores maiores deixam o brilho mais concentrado.
+const float BRILHO_MATERIAL = 48.0f;
+
+// Cor branca para a luz.
+const vec3 COR_LUZ(1.0f, 1.0f, 1.0f);
+
+// Calcula a cor iluminada de um ponto da superfície.
+vec3 calcularIluminacao(vec3 p, vec3 n, vec3 lightDir, float light) {
+  // Mantém uma claridade mesmo sem luz direta.
+  vec3 ambiente = COR_BASE * COR_LUZ * LUZ_AMBIENTE;
+
+  // remove a claridade das partes escuras.
+  // ambiente = vec3(0.0f);
+
+  // Usa Lambert, a força da luz e a resposta do material.
+  vec3 difusa = COR_BASE * COR_LUZ
+    * (INTENSIDADE_LUZ * DIFUSA_MATERIAL * light);
+
+  // Aponta do ponto da superfície para a fonte de luz.
+  vec3 luz = -lightDir;
+
+  // Aponta do ponto da superfície para a câmera.
+  vec3 vista = camera.position() - p;
+  float distancia = length(vista);
+
+  float especular = 0.0f;
+
+  // Só cria brilho no lado que recebe luz direta.
+  if (dot(n, luz) > 0.0f && distancia > 0.0f) {
+    vista /= distancia;
+
+    // Encontra a direção entre a luz e a câmera.
+    vec3 meio = luz + vista;
+    float tamanho = length(meio);
+
+    // Evita dividir por zero se as direções se anularem.
+    if (tamanho > 0.0f) {
+      meio /= tamanho;
+
+      // Calcula o brilho pelo modelo de Blinn–Phong.
+      float alinhamento = std::max(0.0f, dot(n, meio));
+      especular = pow(alinhamento, BRILHO_MATERIAL);
+    }
+  }
+
+  // Usa a cor da luz na mancha de brilho.
+  vec3 brilho = COR_LUZ
+    * (INTENSIDADE_LUZ * ESPECULAR_MATERIAL * especular);
+
+  // remove a mancha de brilho.
+  // brilho = vec3(0.0f);
+
+  // Soma os efeitos e mantém as cores entre 0 e 1.
+  return glm::clamp(
+    ambiente + difusa + brilho,
+    vec3(0.0f),
+    vec3(1.0f)
+  );
+}
+
+// ============================================================
 // SPHERE
 // Desenha a esfera usando triângulos.
 // ============================================================
@@ -252,10 +329,10 @@ struct Sphere {
     // Define as divisões da esfera.
     int stacks = 40, slices = 80;
 
-    // TESTE VISUAL: usa menos divisões na esfera.
+    // usa menos divisões na esfera.
     // stacks = 8; slices = 12;
 
-    // TESTE VISUAL: mostra somente as linhas dos triângulos.
+    // mostra somente as linhas dos triângulos.
     // glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
     for (int i = 0; i < stacks; i++) {
@@ -281,24 +358,42 @@ struct Sphere {
           // Calcula a posição do ponto na esfera.
           vec3 p = position + n * radius;
 
-          // TESTE VISUAL: usa a mesma normal em toda a esfera.
+          // usa a mesma normal em toda a esfera.
           // n = vec3(-1.0f, 0.0f, 0.0f);
 
+          /* 
           // Calcula a iluminação neste ponto.
           float light = usarLambert
             ? lambert(n, lightDir)
             : 1.0f;
 
-          // TESTE VISUAL: deixa toda a esfera com a mesma cor.
+          // deixa toda a esfera com a mesma cor.
           // light = 1.0f;
 
-          // TESTE VISUAL: mantém uma claridade mínima na sombra.
+          // mantém uma claridade mínima na sombra.
           // light = 0.1f + 0.9f * light;
 
           // Aplica a iluminação à cor da esfera.
           vec3 c = COR_BASE * light;
 
-          // TESTE VISUAL: representa a direção das normais com cores.
+          // representa a direção das normais com cores.
+          // c = (n + vec3(1.0f)) * 0.5f;
+
+          glColor3f(c.r, c.g, c.b); 
+          */
+
+          float light = usarLambert ? lambert(n, lightDir) : 1.0f;
+
+          // Aplica a iluminação à cor da esfera.
+          vec3 c = usarLambert ? calcularIluminacao(p, n, lightDir, light) : COR_BASE;
+
+          // deixa toda a esfera com a mesma cor.
+          // c = COR_BASE;
+
+          // mantém uma claridade mínima na sombra.
+          // c = COR_BASE * (0.1f + 0.9f * light);
+
+          // representa a direção das normais com cores.
           // c = (n + vec3(1.0f)) * 0.5f;
 
           glColor3f(c.r, c.g, c.b);
@@ -351,7 +446,7 @@ struct Raio {
     glDepthMask(GL_FALSE);
     glLineWidth(1.0f);
 
-    // TESTE VISUAL: engrossa o rastro dos raios.
+    // engrossa o rastro dos raios.
     // glLineWidth(4.0f);
 
     if (frente > cauda) {
@@ -379,7 +474,7 @@ struct Raio {
       // Marca onde o raio atinge a superfície.
       glPointSize(5.0f);
 
-      // TESTE VISUAL: aumenta os pontos de impacto.
+      // aumenta os pontos de impacto.
       // glPointSize(12.0f);
 
       glColor3f(1.0f, 0.55f, 0.1f);
@@ -398,10 +493,10 @@ struct Raio {
   void step(float dt) {
     float passo = VELOCIDADE * dt;
 
-    // TESTE VISUAL: deixa os raios mais rápidos.
+    // deixa os raios mais rápidos.
     // passo *= 3.0f;
 
-    // TESTE VISUAL: congela os raios.
+    // congela os raios.
     // passo = 0.0f;
 
     // Reinicia depois que o rastro desaparece.
@@ -597,7 +692,7 @@ void criarRaios() {
         ? intersecaoEsfera(origem, lightDir)
         : intersecaoGaussiana(origem);
 
-      // TESTE VISUAL: deixa os raios seguirem depois da superfície.
+      // deixa os raios seguirem depois da superfície.
       // impacto = semImpacto();
 
       bool atingiu = std::isfinite(impacto);
@@ -720,7 +815,7 @@ void vertice(vec3 p) {
 void desenharGaussiana() {
   const int faixas = 48, divisoes = 96;
 
-  // TESTE VISUAL: mostra os triângulos da gaussiana.
+  // mostra os triângulos da gaussiana.
   // glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
   for (int i = 0; i < faixas; i++) {
@@ -734,6 +829,7 @@ void desenharGaussiana() {
         float y =
           -DOMINIO + 2.0f * DOMINIO * (i + k) / faixas;
 
+        /* 
         vec3 n = normalFuncao(x, y);
 
         float light = usarLambert
@@ -742,11 +838,25 @@ void desenharGaussiana() {
 
         vec3 c = COR_BASE * light;
 
-        // TESTE VISUAL: representa as normais da gaussiana com cores.
+        // representa as normais da gaussiana com cores.
         // c = (n + vec3(1.0f)) * 0.5f;
 
         glColor3f(c.r, c.g, c.b);
-        vertice(vec3(x, y, funcao(x, y)));
+        vertice(vec3(x, y, funcao(x, y))); 
+        */
+
+        vec3 n = normalFuncao(x, y);
+        vec3 p(x, y, funcao(x, y));
+
+        float light = usarLambert ? lambert(n, lightDir) : 1.0f;
+
+        vec3 c = usarLambert ? calcularIluminacao(p, n, lightDir, light) : COR_BASE;
+
+        // representa as normais da gaussiana com cores.
+        // c = (n + vec3(1.0f)) * 0.5f;
+
+        glColor3f(c.r, c.g, c.b);
+        vertice(p);
       }
     }
 
@@ -765,12 +875,12 @@ void desenharEstudo() {
     vec3 u = q.u * 110.0f;
     vec3 v = q.v * 110.0f;
 
-    // TESTE VISUAL: aumenta o plano tangente.
+    // aumenta o plano tangente.
     // u *= 2.0f; v *= 2.0f;
 
     float alpha = 0.35f;
 
-    // TESTE VISUAL: tira a transparência do plano.
+    // tira a transparência do plano.
     // alpha = 1.0f;
 
     glEnable(GL_BLEND);
@@ -806,7 +916,7 @@ void desenharEstudo() {
   if (mostrarNormal) {
     vec3 ponta = q.p + q.n * 130.0f;
 
-    // TESTE VISUAL: aumenta a seta da normal.
+    // aumenta a seta da normal.
     // ponta = q.p + q.n * 260.0f;
 
     glColor3f(1.0f, 0.9f, 0.1f);
