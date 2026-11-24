@@ -296,7 +296,8 @@ struct Sphere {
           // light = 0.1f + 0.9f * light;
 
           // Aplica a iluminação à cor da esfera.
-          vec3 c = COR_BASE * light;
+          vec3 ilu(1.0f, 1.0f, 1.0f); 
+          vec3 c = (light > 0 ? (COR_BASE * (light*ilu)) : COR_BASE * light);
 
           // TESTE VISUAL: representa a direção das normais com cores.
           // c = (n + vec3(1.0f)) * 0.5f;
