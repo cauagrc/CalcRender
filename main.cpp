@@ -306,8 +306,29 @@ const float BRILHO_MATERIAL = 48.0f;
 // Cor branca para a luz.
 const vec3 COR_LUZ(1.0f, 1.0f, 1.0f);
 
+// Distância máxima alcançada pela luz.
+const float ALCANCE_LUZ = 1800.0f;
+
+// Tamanho da esfera que representa o Sol.
+const float RAIO_LUZ = 30.0f;
+
+// Deixa o feixe mais forte ou mais discreto.
+const float OPACIDADE_FEIXE = 0.36f;
+
+// Enfraquece a luz com a distância e suaviza o final do alcance.
+float atenuacaoLuz(float distancia) {
+  if (ALCANCE_LUZ <= 0.0f) {
+    return 0.0f;
+  }
+
+  float proporcao = std::max(0.0f, distancia) / ALCANCE_LUZ;
+  float finalSuave = 1.0f - smoothstep(0.7f, 1.0f, proporcao);
+
+  return finalSuave / (1.0f + proporcao * proporcao);
+}
+
 // Calcula a cor iluminada de um ponto da superfície.
-vec3 calcularIluminacao(vec3 p, vec3 n, vec3 L, float light) {
+vec3 calcularIluminacao(vec3 p, vec3 n, vec3 L, float light, float distanciaLuz) {
   // Mantém uma claridade mesmo sem luz direta.
   vec3 ambiente = COR_BASE * COR_LUZ * LUZ_AMBIENTE;
 
@@ -315,8 +336,9 @@ vec3 calcularIluminacao(vec3 p, vec3 n, vec3 L, float light) {
   // ambiente = vec3(0.0f);
 
   // Usa Lambert, a força da luz e a resposta do material.
+  float intensidade = INTENSIDADE_LUZ * atenuacaoLuz(distanciaLuz);
   vec3 difusa =
-      COR_BASE * COR_LUZ * (INTENSIDADE_LUZ * DIFUSA_MATERIAL * light);
+      COR_BASE * COR_LUZ * (intensidade * DIFUSA_MATERIAL * light);
 
   // L ja aponta do ponto da superficie para a luz.
   vec3 luz = L;
@@ -346,7 +368,7 @@ vec3 calcularIluminacao(vec3 p, vec3 n, vec3 L, float light) {
   }
 
   // Usa a cor da luz na mancha de brilho.
-  vec3 brilho = COR_LUZ * (INTENSIDADE_LUZ * ESPECULAR_MATERIAL * especular);
+  vec3 brilho = COR_LUZ * (intensidade * ESPECULAR_MATERIAL * especular);
 
   // remove a mancha de brilho.
   // brilho = vec3(0.0f);
@@ -423,11 +445,15 @@ struct Sphere {
           glColor3f(c.r, c.g, c.b);
           */
 
-          vec3 L = normalize(lightPos - p);
+          vec3 ateLuz = lightPos - p;
+          float distanciaLuz = length(ateLuz);
+          vec3 L = distanciaLuz > 0.0001f
+            ? ateLuz / distanciaLuz : vec3(0.0f);
           float light = usarLambert ? lambert(n, L) : 1.0f;
 
           // Aplica a iluminação à cor da esfera.
-          vec3 c = usarLambert ? calcularIluminacao(p, n, L, light) : COR_BASE;
+          vec3 c = usarLambert
+            ? calcularIluminacao(p, n, L, light, distanciaLuz) : COR_BASE;
 
           // deixa toda a esfera com a mesma cor.
           // c = COR_BASE;
@@ -658,14 +684,151 @@ float intersecaoEsfera(vec3 origem, vec3 direcao) {
   return t * sqrt(a);
 }
 
-float intersecaoGeral(vec3 o, vec3 d) {
-  const float passo = 2.0f;
-  for (float t = 0.0f; t < 3000.0f; t += passo) {
-    vec3 p = o + d * t;
-    if (abs(p.x) <= DOMINIO && abs(p.y) <= DOMINIO && p.z <= funcao(p.x, p.y)) {
-      return t;
+// Compara a altura do raio com a altura da gaussiana.
+float diferencaNoRaio(vec3 origem, vec3 direcao, float t) {
+  vec3 p = origem + direcao * t;
+  return p.z - funcao(p.x, p.y);
+}
+
+// Usa as derivadas para acompanhar essa diferença.
+float inclinacaoNoRaio(vec3 origem, vec3 direcao, float t) {
+  vec3 p = origem + direcao * t;
+
+  return direcao.z
+    - derivadaX(p.x, p.y) * direcao.x
+    - derivadaY(p.x, p.y) * direcao.y;
+}
+
+// Procura o impacto em um trecho só de subida ou só de descida.
+float intersecaoTrechoGaussiana(
+  vec3 origem, vec3 direcao, float inicio, float fim
+) {
+  float a = diferencaNoRaio(origem, direcao, inicio);
+  float b = diferencaNoRaio(origem, direcao, fim);
+
+  if (abs(a) <= 0.0001f) {
+    return inicio;
+  }
+
+  if (a * b > 0.0f) {
+    return abs(b) <= 0.0001f ? fim : semImpacto();
+  }
+
+  // Reduz o intervalo pela metade até chegar ao impacto.
+  for (int i = 0; i < 32; i++) {
+    float meio = (inicio + fim) * 0.5f;
+    float valor = diferencaNoRaio(origem, direcao, meio);
+
+    if ((a < 0.0f) == (valor < 0.0f)) {
+      inicio = meio;
+      a = valor;
+    } else {
+      fim = meio;
     }
   }
+
+  return (inicio + fim) * 0.5f;
+}
+
+// Calcula o primeiro impacto, inclusive com a luz inclinada.
+float intersecaoGeral(vec3 origem, vec3 direcao, float alcance = 3000.0f) {
+  float tamanho = length(direcao);
+
+  if (tamanho <= 0.0f || alcance <= 0.0f) {
+    return semImpacto();
+  }
+
+  direcao /= tamanho;
+
+  vec3 minimo(-DOMINIO, -DOMINIO, 0.0f);
+  vec3 maximo(DOMINIO, DOMINIO, ALTURA);
+
+  float inicio = 0.0f;
+  float fim = alcance;
+
+  // Considera somente a região ocupada pela superfície.
+  for (int eixo = 0; eixo < 3; eixo++) {
+    if (abs(direcao[eixo]) < 0.0000001f) {
+      if (origem[eixo] < minimo[eixo] || origem[eixo] > maximo[eixo]) {
+        return semImpacto();
+      }
+
+      continue;
+    }
+
+    float a = (minimo[eixo] - origem[eixo]) / direcao[eixo];
+    float b = (maximo[eixo] - origem[eixo]) / direcao[eixo];
+
+    if (a > b) {
+      std::swap(a, b);
+    }
+
+    inicio = std::max(inicio, a);
+    fim = std::min(fim, b);
+
+    if (inicio > fim) {
+      return semImpacto();
+    }
+  }
+
+  // Divide a busca onde a segunda derivada muda de sinal.
+  vector<float> cortes = {inicio};
+  float horizontal = direcao.x * direcao.x + direcao.y * direcao.y;
+
+  if (horizontal > 0.00000001f) {
+    float centro = -(origem.x * direcao.x + origem.y * direcao.y)
+      / horizontal;
+    float intervalo = ESCALA / sqrt(2.0f * horizontal);
+
+    for (float t : {centro - intervalo, centro + intervalo}) {
+      if (t > inicio && t < fim) {
+        cortes.push_back(t);
+      }
+    }
+  }
+
+  cortes.push_back(fim);
+
+  for (size_t i = 0; i + 1 < cortes.size(); i++) {
+    float a = cortes[i];
+    float b = cortes[i + 1];
+    float da = inclinacaoNoRaio(origem, direcao, a);
+    float db = inclinacaoNoRaio(origem, direcao, b);
+    float divisao = b;
+
+    if (da * db < 0.0f) {
+      float esquerda = a, direita = b;
+
+      // Localiza onde o trecho muda entre subida e descida.
+      for (int j = 0; j < 32; j++) {
+        float meio = (esquerda + direita) * 0.5f;
+        float valor = inclinacaoNoRaio(origem, direcao, meio);
+
+        if ((da < 0.0f) == (valor < 0.0f)) {
+          esquerda = meio;
+          da = valor;
+        } else {
+          direita = meio;
+        }
+      }
+
+      divisao = (esquerda + direita) * 0.5f;
+    }
+
+    // Examina os trechos na ordem em que o raio os percorre.
+    float impacto = intersecaoTrechoGaussiana(origem, direcao, a, divisao);
+
+    if (std::isfinite(impacto)) {
+      return impacto;
+    }
+
+    impacto = intersecaoTrechoGaussiana(origem, direcao, divisao, b);
+
+    if (std::isfinite(impacto)) {
+      return impacto;
+    }
+  }
+
   return semImpacto();
 }
 
@@ -851,13 +1014,182 @@ void moverPonto(float dt) {
 
 void vertice(vec3 p) { glVertex3f(p.x, p.y, p.z); }
 
+// Mostra o caminho da luz com várias camadas transparentes.
+void desenharFeixe() {
+  if (!mostrarRaios || INTENSIDADE_LUZ <= 0.0f || ALCANCE_LUZ <= RAIO_LUZ) return;
+
+  const int camadas = 24, lados = 40, trechos = 12;
+  vec3 alvo = cena == Cena::Esfera
+    ? sphere.position : vec3(0.0f, 0.0f, ALTURA * 0.5f);
+  float raioAlvo = cena == Cena::Esfera
+    ? sphere.radius : length(vec3(DOMINIO, DOMINIO, ALTURA * 0.5f));
+
+  float distancia = length(alvo - lightPos);
+  if (distancia <= 0.0001f) return;
+
+  vec3 eixo = (alvo - lightPos) / distancia;
+  vec3 referencia = abs(eixo.z) < 0.9999f
+    ? vec3(0.0f, 0.0f, 1.0f) : vec3(0.0f, 1.0f, 0.0f);
+  vec3 horizontal = normalize(cross(referencia, eixo));
+  vec3 vertical = normalize(cross(eixo, horizontal));
+
+  // Ajusta a abertura para acompanhar o tamanho do objeto.
+  float abertura = asin(glm::clamp(raioAlvo / distancia, 0.0f, 0.95f));
+  abertura = glm::clamp(abertura * 1.07f, radians(12.0f), radians(60.0f));
+
+  struct Amostra {
+    vec3 direcao;
+    float limite;
+  };
+
+  static vector<Amostra> amostras;
+  static vec3 ultimaPosicao(0.0f), ultimoAlvo(0.0f);
+  static float ultimoRaio = -1.0f;
+  static Cena ultimaCena = Cena::Esfera;
+
+  // Recalcula os contatos somente quando a luz ou o objeto muda.
+  if (amostras.empty() || length(lightPos - ultimaPosicao) > 0.0001f
+      || length(alvo - ultimoAlvo) > 0.0001f
+      || raioAlvo != ultimoRaio || cena != ultimaCena) {
+    amostras.resize(camadas * lados);
+
+    for (int camada = 0; camada < camadas; camada++) {
+      float raio = (camada + 0.5f) / camadas;
+
+      for (int i = 0; i < lados; i++) {
+        float angulo = 2.0f * M_PI * i / lados;
+        vec3 lateral = horizontal * cos(angulo) + vertical * sin(angulo);
+        vec3 direcao = normalize(eixo + lateral * (tan(abertura) * raio));
+
+        float impacto = cena == Cena::Esfera
+          ? intersecaoEsfera(lightPos, direcao)
+          : intersecaoGeral(lightPos, direcao, ALCANCE_LUZ);
+
+        float limite = std::isfinite(impacto)
+          ? std::min(impacto, ALCANCE_LUZ) : ALCANCE_LUZ;
+
+        amostras[camada * lados + i] = {direcao, limite};
+      }
+    }
+
+    ultimaPosicao = lightPos;
+    ultimoAlvo = alvo;
+    ultimoRaio = raioAlvo;
+    ultimaCena = cena;
+  }
+
+  // Guarda os ajustes para não afetar os outros desenhos.
+  glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT
+               | GL_CURRENT_BIT | GL_POLYGON_BIT);
+  glEnable(GL_DEPTH_TEST);
+  glDisable(GL_CULL_FACE);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+  glDepthMask(GL_FALSE);
+
+  for (int camada = 0; camada < camadas; camada++) {
+    float raio = (camada + 0.5f) / camadas;
+    float borda = (1.0f - raio * raio) * (1.0f - raio * raio);
+
+    for (int i = 0; i < lados; i++) {
+      glBegin(GL_TRIANGLE_STRIP);
+
+      for (int j = 0; j <= trechos; j++) {
+        float t = float(j) / trechos;
+
+        for (int k = 0; k < 2; k++) {
+          const Amostra &a = amostras[camada * lados + (i + k) % lados];
+          float inicio = RAIO_LUZ;
+          float caminho = inicio + std::max(0.0f, a.limite - inicio) * t;
+          // Divide o brilho entre as camadas.
+          float alpha = a.limite > inicio
+            ? (OPACIDADE_FEIXE / camadas) * INTENSIDADE_LUZ
+              * borda * atenuacaoLuz(caminho)
+            : 0.0f;
+
+          // O feixe fica mais suave nas bordas e longe da fonte.
+          glColor4f(1.0f, 0.78f, 0.35f, glm::clamp(alpha, 0.0f, 1.0f));
+          vertice(lightPos + a.direcao * caminho);
+        }
+      }
+
+      glEnd();
+    }
+  }
+
+  glPopAttrib();
+}
+
+// Desenha o Sol como uma esfera luminosa com um halo suave.
 void desenharLuz() {
+  glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT
+               | GL_CURRENT_BIT | GL_POLYGON_BIT);
+  glEnable(GL_DEPTH_TEST);
+  glDisable(GL_BLEND);
+  glDisable(GL_CULL_FACE);
+  glDepthMask(GL_TRUE);
+
+  mat4 view = camera.view();
+  vec3 direita(view[0][0], view[1][0], view[2][0]);
+  vec3 cima(view[0][1], view[1][1], view[2][1]);
+  vec3 frente(view[0][2], view[1][2], view[2][2]);
+  vec3 vista = camera.position() - lightPos;
+  float distancia = length(vista);
+  vista = distancia > 0.0001f ? vista / distancia : frente;
+  float emissao = glm::clamp(INTENSIDADE_LUZ, 0.0f, 1.0f);
+
+  const int faixas = 18, divisoes = 36;
+  for (int i = 0; i < faixas; i++) {
+    glBegin(GL_TRIANGLE_STRIP);
+
+    for (int j = 0; j <= divisoes; j++) {
+      float theta = 2.0f * M_PI * j / divisoes;
+
+      for (int k = 0; k < 2; k++) {
+        float phi = M_PI * (i + k) / faixas;
+        vec3 n(sin(phi) * cos(theta), sin(phi) * sin(theta), cos(phi));
+        float centro = pow(std::max(0.0f, dot(n, vista)), 0.55f);
+
+        // O centro é claro e a borda fica alaranjada.
+        vec3 cor = mix(vec3(1.0f, 0.40f, 0.03f),
+                       vec3(1.0f, 0.98f, 0.78f), centro) * emissao;
+        glColor3f(cor.r, cor.g, cor.b);
+        vertice(lightPos + n * RAIO_LUZ);
+      }
+    }
+
+    glEnd();
+  }
+
+  // Acrescenta um brilho que desaparece aos poucos ao redor do Sol.
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+  glDepthMask(GL_FALSE);
+  vec3 centroHalo = lightPos + frente * (RAIO_LUZ + 0.5f);
+  float alpha = glm::clamp(0.28f * INTENSIDADE_LUZ, 0.0f, 0.65f);
+
+  glBegin(GL_TRIANGLE_FAN);
+  glColor4f(1.0f, 0.60f, 0.12f, alpha);
+  vertice(centroHalo);
+
+  for (int i = 0; i <= 64; i++) {
+    float angulo = 2.0f * M_PI * i / 64;
+    glColor4f(1.0f, 0.45f, 0.05f, 0.0f);
+    vertice(centroHalo + (direita * cos(angulo) + cima * sin(angulo)) * 100.0f);
+  }
+
+  glEnd();
+  glPopAttrib();
+
+  // Desenho antigo, mantido para comparação.
+  /*
   glPointSize(12.0f);
   glColor3f(1.0f, 1.0f, 0.3f);
   glBegin(GL_POINTS);
   vertice(lightPos);
   glEnd();
   glPointSize(1.0f);
+  */
 }
 
 // Desenha a gaussiana usando vários triângulos.
@@ -895,11 +1227,15 @@ void desenharGaussiana() {
         vec3 n = normalFuncao(x, y);
         vec3 p(x, y, funcao(x, y));
 
-        vec3 L = normalize(lightPos - p);
+        vec3 ateLuz = lightPos - p;
+        float distanciaLuz = length(ateLuz);
+        vec3 L = distanciaLuz > 0.0001f
+          ? ateLuz / distanciaLuz : vec3(0.0f);
 
         float light = usarLambert ? lambert(n, L) : 1.0f;
 
-        vec3 c = usarLambert ? calcularIluminacao(p, n, L, light) : COR_BASE;
+        vec3 c = usarLambert
+          ? calcularIluminacao(p, n, L, light, distanciaLuz) : COR_BASE;
 
         // representa as normais da gaussiana com cores.
         // c = (n + vec3(1.0f)) * 0.5f;
@@ -1002,6 +1338,8 @@ void desenharEstudo() {
 
 int main() {
   //criarRaios();
+  // Usa os valores iniciais dos três sliders para posicionar a luz.
+  calcularLuz();
 
   // Mantém a aplicação em execução enquanto a janela
   // não receber um pedido de encerramento.
@@ -1036,6 +1374,7 @@ int main() {
     // Desenha o plano tangente e a normal.
     desenharEstudo();
 
+    desenharFeixe();
     desenharLuz();
 
     int ww, wh;
