@@ -738,7 +738,7 @@ void criarRaios() {
 
 void atualizarLuz() {
   calcularLuz();
-  criarRaios();
+  //criarRaios();
 }
 
 Slider sliders[3] = {
@@ -1001,7 +1001,7 @@ void desenharEstudo() {
 // ============================================================
 
 int main() {
-  criarRaios();
+  //criarRaios();
 
   // Mantém a aplicação em execução enquanto a janela
   // não receber um pedido de encerramento.
