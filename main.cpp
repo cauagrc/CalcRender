@@ -1,5 +1,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX
+#include <glm/common.hpp>
+#include <glm/geometric.hpp>
 #endif
 
 #include <GL/glew.h>
@@ -229,9 +231,9 @@ struct Engine {
   }
 };
 
-// Os dois vetores recebidos devem ter tamanho 1.
-static float lambert(vec3 normal, vec3 lightDir) {
-  return std::max(0.0f, dot(normal, -lightDir));
+// Os dois vetores recebidos devem ter tamanho 1. L aponta da superficie para a luz.
+static float lambert(vec3 normal, vec3 L) {
+  return std::max(0.0f, dot(normal, L));
 }
 
 // ============================================================
@@ -258,7 +260,7 @@ const float BRILHO_MATERIAL = 48.0f;
 const vec3 COR_LUZ(1.0f, 1.0f, 1.0f);
 
 // Calcula a cor iluminada de um ponto da superfície.
-vec3 calcularIluminacao(vec3 p, vec3 n, vec3 lightDir, float light) {
+vec3 calcularIluminacao(vec3 p, vec3 n, vec3 L, float light) {
   // Mantém uma claridade mesmo sem luz direta.
   vec3 ambiente = COR_BASE * COR_LUZ * LUZ_AMBIENTE;
 
@@ -269,8 +271,8 @@ vec3 calcularIluminacao(vec3 p, vec3 n, vec3 lightDir, float light) {
   vec3 difusa = COR_BASE * COR_LUZ
     * (INTENSIDADE_LUZ * DIFUSA_MATERIAL * light);
 
-  // Aponta do ponto da superfície para a fonte de luz.
-  vec3 luz = -lightDir;
+  // L ja aponta do ponto da superficie para a luz.
+  vec3 luz = L;
 
   // Aponta do ponto da superfície para a câmera.
   vec3 vista = camera.position() - p;
@@ -325,7 +327,7 @@ struct Sphere {
   // Recebe a posição inicial e define o raio.
   Sphere(vec3 pos) : position(pos), radius(250.0f) {}
 
-  void draw(vec3 lightDir, bool usarLambert = true) {
+  void draw(vec3 lightPos, bool usarLambert = true) {
     // Define as divisões da esfera.
     int stacks = 40, slices = 80;
 
@@ -383,10 +385,11 @@ struct Sphere {
           glColor3f(c.r, c.g, c.b); 
           */
 
-          float light = usarLambert ? lambert(n, lightDir) : 1.0f;
+          vec3 L = normalize(lightPos - p);
+          float light = usarLambert ? lambert(n, L) : 1.0f;
 
           // Aplica a iluminação à cor da esfera.
-          vec3 c = usarLambert ? calcularIluminacao(p, n, lightDir, light) : COR_BASE;
+          vec3 c = usarLambert ? calcularIluminacao(p, n, L, light) : COR_BASE;
 
           // deixa toda a esfera com a mesma cor.
           // c = COR_BASE;
@@ -517,7 +520,8 @@ vector<Raio> raios;
 Engine engine;
 Sphere sphere(vec3(0.0f));
 
-vec3 lightDir = normalize(vec3(1.0f, 0.0f, 0.0f));
+//vec3 lightDir = normalize(vec3(1.0f, 0.0f, 0.0f));
+vec3 lightPos(-800.0f, 0.0f, 0.0f);
 
 enum class Cena {
   Esfera,
@@ -640,6 +644,17 @@ float intersecaoEsfera(vec3 origem, vec3 direcao) {
   return t * sqrt(a);
 }
 
+float intersecaoGeral(vec3 o, vec3 d) {
+  const float passo = 2.0f;
+  for (float t = 0.0f; t< 3000.0f; t += passo) {
+    vec3 p = o+d*t;
+    if (abs(p.x) <= DOMINIO && abs(p.y) <= DOMINIO && p.z <= funcao(p.x, p.y)) {
+      return t;
+    }
+  }
+  return semImpacto();
+}
+
 // Usa a direção +X dos raios desta cena.
 float intersecaoGaussiana(vec3 origem) {
   if (
@@ -676,6 +691,7 @@ float intersecaoGaussiana(vec3 origem) {
 // Cria os raios e calcula seus impactos.
 void criarRaios() {
   // Remove os raios da cena anterior.
+  vector<Raio> antigos = raios;
   raios.clear();
 
   for (int i = 0; i < 5; i++) {
@@ -686,12 +702,14 @@ void criarRaios() {
         ? -240.0f + j * 120.0f
         : 30.0f + j * 45.0f;
 
-      vec3 origem(-850.0f, y, z);
+      vec3 origem = lightPos;
+      vec3 alvo(0.0f, y, z);
+      vec3 dir = normalize(alvo - origem);
 
       // Calcula a distância até a superfície.
       float impacto = cena == Cena::Esfera
-        ? intersecaoEsfera(origem, lightDir)
-        : intersecaoGaussiana(origem);
+        ? intersecaoEsfera(origem, dir)
+        : intersecaoGeral(origem, dir);
 
       // deixa os raios seguirem depois da superfície.
       // impacto = semImpacto();
@@ -706,9 +724,14 @@ void criarRaios() {
         limite + RASTRO + 100.0f
       );
 
+      int idx = i * 5 + j;
+      if (idx < (int)antigos.size()) {
+        inicio = antigos[idx].progresso;
+      }
+
       raios.push_back({
         origem,
-        lightDir,
+        dir,
         limite,
         inicio,
         atingiu
@@ -812,6 +835,15 @@ void vertice(vec3 p) {
   glVertex3f(p.x, p.y, p.z);
 }
 
+void desenharLuz() {
+  glPointSize(12.0f);
+  glColor3f(1.0f, 1.0f, 0.3f);
+  glBegin(GL_POINTS);
+  vertice(lightPos);
+  glEnd();
+  glPointSize(1.0f);
+}
+
 // Desenha a gaussiana usando vários triângulos.
 void desenharGaussiana() {
   const int faixas = 48, divisoes = 96;
@@ -849,9 +881,11 @@ void desenharGaussiana() {
         vec3 n = normalFuncao(x, y);
         vec3 p(x, y, funcao(x, y));
 
-        float light = usarLambert ? lambert(n, lightDir) : 1.0f;
+        vec3 L = normalize(lightPos - p);
 
-        vec3 c = usarLambert ? calcularIluminacao(p, n, lightDir, light) : COR_BASE;
+        float light = usarLambert ? lambert(n, L) : 1.0f;
+
+        vec3 c = usarLambert ? calcularIluminacao(p, n, L, light) : COR_BASE;
 
         // representa as normais da gaussiana com cores.
         // c = (n + vec3(1.0f)) * 0.5f;
@@ -969,7 +1003,7 @@ int main() {
 
     // Desenha a superfície selecionada.
     if (cena == Cena::Esfera) {
-      sphere.draw(lightDir, usarLambert);
+      sphere.draw(lightPos, usarLambert);
     } else {
       desenharGaussiana();
     }
@@ -987,6 +1021,8 @@ int main() {
 
     // Desenha o plano tangente e a normal.
     desenharEstudo();
+
+    desenharLuz();
 
     // Apresenta o quadro desenhado na janela.
     glfwSwapBuffers(engine.window);
