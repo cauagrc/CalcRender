@@ -94,6 +94,18 @@ struct Camera {
   float yaw = 0.6f, pitch = 0.4f, dist = 1800.0f;
   vec3 target = vec3(0.0f);
 
+  // Guarda qual direção representa o alto da tela.
+  vec3 cima = vec3(-sin(pitch) * cos(yaw), -sin(pitch) * sin(yaw), cos(pitch));
+
+  // Guarda a visão e o mouse no início de cada arraste.
+  float yawInicial = 0.0f, pitchInicial = 0.0f;
+  float centroMouseX = 0.0f, centroMouseY = 0.0f, raioMouse = 1.0f;
+  vec3 mouseInicial = vec3(0.0f, 0.0f, 1.0f);
+  vec3 direcaoInicial = vec3(1.0f, 0.0f, 0.0f);
+  vec3 cimaInicial = vec3(0.0f, 0.0f, 1.0f);
+  vec3 direitaInicial = vec3(0.0f, 1.0f, 0.0f);
+  bool arrasteIniciado = false;
+
   vec3 position() const {
     // Invertia a direcao do mouse
     /**
@@ -112,35 +124,120 @@ struct Camera {
     // Fixa a câmera de lado.
     // eye = target + vec3(-1450.0f, 0.0f, 0.0f);
 
-    return lookAt(eye, target, vec3(0, 0, 1));
+    return lookAt(eye, target, cima);
+  }
+
+  // Relaciona o mouse com uma esfera virtual sobre a janela.
+  vec3 pontoMouse(double x, double y) const {
+    float px = float(x - centroMouseX) / raioMouse;
+    float py = float(centroMouseY - y) / raioMouse;
+    float quadrado = px * px + py * py;
+
+    // Suaviza o movimento mesmo quando o mouse sai da esfera virtual.
+    float pz = quadrado <= 0.5f
+      ? sqrt(1.0f - quadrado) : 0.5f / sqrt(quadrado);
+
+    return normalize(vec3(px, py, pz));
+  }
+
+  // Fixa a referência quando o usuário começa a arrastar.
+  void iniciarArraste(double x, double y, int largura, int altura) {
+    centroMouseX = largura * 0.5f;
+    centroMouseY = altura * 0.5f;
+    raioMouse = std::max(1.0f, std::min(largura, altura) * 0.45f);
+    mouseInicial = pontoMouse(x, y);
+
+    yawInicial = yaw;
+    pitchInicial = pitch;
+    direcaoInicial = normalize(position() - target);
+    cimaInicial = cima;
+    direitaInicial = normalize(cross(cimaInicial, direcaoInicial));
+    arrasteIniciado = true;
+  }
+
+  // Usa o início do arraste, sem acumular os giros anteriores.
+  void girar(double x, double y) {
+    if (!arrasteIniciado) return;
+
+    vec3 atual = pontoMouse(x, y);
+    vec3 eixo = cross(atual, mouseInicial);
+    float seno = length(eixo);
+    float cosseno = glm::clamp(dot(atual, mouseInicial), -1.0f, 1.0f);
+
+    // Voltar ao mesmo ponto restaura exatamente a visão inicial.
+    if (seno < 0.0000001f && cosseno > 0.0f) {
+      yaw = yawInicial;
+      pitch = pitchInicial;
+      cima = cimaInicial;
+      return;
+    }
+
+    float angulo = atan2(seno, cosseno);
+
+    if (seno < 0.0000001f) {
+      vec3 referencia = abs(mouseInicial.x) < 0.9f
+        ? vec3(1.0f, 0.0f, 0.0f) : vec3(0.0f, 1.0f, 0.0f);
+      eixo = normalize(cross(mouseInicial, referencia));
+    } else {
+      eixo /= seno;
+    }
+
+    // Converte a direção do arraste para a visão guardada no clique.
+    vec3 altoInicial = normalize(cross(direcaoInicial, direitaInicial));
+    vec3 eixoMundo = normalize(direitaInicial * eixo.x
+      + altoInicial * eixo.y + direcaoInicial * eixo.z);
+    mat4 giro = rotate(mat4(1.0f), angulo, eixoMundo);
+
+    vec3 direcao = normalize(vec3(giro * vec4(direcaoInicial, 0.0f)));
+    cima = normalize(vec3(giro * vec4(cimaInicial, 0.0f)));
+    yaw = atan2(direcao.y, direcao.x);
+    pitch = atan2(direcao.z, length(vec2(direcao.x, direcao.y)));
   }
 };
 
 Camera camera;
 bool dragging = false;
+bool arrastandoSlider = false;
 double lastX = 0, lastY = 0;
 
 void mouseButtonCallback(GLFWwindow *w, int button, int action, int) {
   if (button == GLFW_MOUSE_BUTTON_LEFT) {
     glfwGetCursorPos(w, &lastX, &lastY);
     if (action == GLFW_PRESS) {
-      dragging = !sliderPress(lastX, lastY);   // se clicou no slider, não orbita
+      // Cada clique começa com uma captura nova do mouse.
+      sliderRelease();
+      arrastandoSlider = sliderPress(lastX, lastY);
+      dragging = !arrastandoSlider;   // se clicou no slider, não orbita
+
+      if (dragging) {
+        int largura, altura;
+        glfwGetWindowSize(w, &largura, &altura);
+        camera.iniciarArraste(lastX, lastY, largura, altura);
+      }
     } else {
       sliderRelease();
       dragging = false;
+      arrastandoSlider = false;
     }
   }
 }
 
-void cursorCallback(GLFWwindow*, double x, double y) {
-  if (sliderDrag(x)) {
+void cursorCallback(GLFWwindow *w, double x, double y) {
+  lastX = x; lastY = y;
+
+  // Solta a captura mesmo se a liberação ocorreu fora da janela.
+  if (glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT) != GLFW_PRESS) {
+    sliderRelease();
+    dragging = false;
+    arrastandoSlider = false;
+    return;
+  }
+
+  if (arrastandoSlider && sliderDrag(x)) {
     // o slider cuidou do movimento
   } else if (dragging) {
-    camera.yaw   -= float(x - lastX) * 0.005f;
-    camera.pitch += float(y - lastY) * 0.005f;
-    camera.pitch  = glm::clamp(camera.pitch, -1.5f, 1.5f);
+    camera.girar(x, y);
   }
-  lastX = x; lastY = y;
 }
 
 void scrollCallback(GLFWwindow *, double, double yoff) {
@@ -218,7 +315,7 @@ struct Engine {
     glfwSetMouseButtonCallback(window, mouseButtonCallback);
     glfwSetCursorPosCallback(window, cursorCallback);
     glfwSetScrollCallback(window, scrollCallback);
-    glfwSetKeyCallback(window, keyCallback);
+    // glfwSetKeyCallback(window, keyCallback);
 
     // Guarda o tempo inicial.
     lastTime = glfwGetTime();
@@ -1351,7 +1448,7 @@ int main() {
     }
 
     // Atualiza o ponto selecionado.
-    moverPonto(engine.dt);
+    // moverPonto(engine.dt);
 
     // Desenha a superfície selecionada.
     if (cena == Cena::Esfera) {
@@ -1372,9 +1469,9 @@ int main() {
     }
 
     // Desenha o plano tangente e a normal.
-    desenharEstudo();
+    // desenharEstudo();
 
-    desenharFeixe();
+    //desenharFeixe();
     desenharLuz();
 
     int ww, wh;
