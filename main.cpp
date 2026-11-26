@@ -39,27 +39,71 @@ const float RASTRO = 180.0f;
 
 const vec3 COR_BASE(1.0f, 0.12f, 0.08f);
 
+bool sliderPress(double mx, double my);
+bool sliderDrag(double mx);
+void sliderRelease();
+
+struct Slider {
+  float x, y, w, h;
+  float minV, maxV;
+  float* value;          // variável que este slider controla
+  void (*onChange)();    // chamada quando o valor muda
+  bool active = false;
+
+  bool inside(double mx, double my) const {
+    return mx >= x && mx <= x + w && my >= y && my <= y + h;
+  }
+
+  void drag(double mx) {
+    float t = glm::clamp(float((mx - x) / w), 0.0f, 1.0f);
+    *value = minV + t * (maxV - minV);
+    if (onChange) onChange();
+  }
+
+  void draw(int winW, int winH) const {
+    glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity();
+    glOrtho(0, winW, winH, 0, -1, 1);
+    glMatrixMode(GL_MODELVIEW);  glPushMatrix(); glLoadIdentity();
+    glDisable(GL_DEPTH_TEST);
+
+    glColor3f(0.3f, 0.3f, 0.3f);                       // trilho
+    glBegin(GL_QUADS);
+    glVertex2f(x, y + h/2 - 2);     glVertex2f(x + w, y + h/2 - 2);
+    glVertex2f(x + w, y + h/2 + 2); glVertex2f(x, y + h/2 + 2);
+    glEnd();
+
+    float hx = x + (*value - minV) / (maxV - minV) * w;
+    glColor3f(1, 1, 1);                                // alça
+    glBegin(GL_QUADS);
+    glVertex2f(hx - 5, y);     glVertex2f(hx + 5, y);
+    glVertex2f(hx + 5, y + h); glVertex2f(hx - 5, y + h);
+    glEnd();
+
+    glEnable(GL_DEPTH_TEST);
+    glMatrixMode(GL_PROJECTION); glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);  glPopMatrix();
+  }
+};
+Slider yawSlider{20, 20, 300, 20, -3.14159f, 3.14159f};
+
 // ============================================================
 // CAMERA
 // Ponto onde o usuario estara vendo a simulacao
 // ============================================================
-struct Camera{
-  float yaw=0.6f, pitch=0.4f, dist=1800.0f;
+struct Camera {
+  float yaw = 0.6f, pitch = 0.4f, dist = 1800.0f;
   vec3 target = vec3(0.0f);
 
   vec3 position() const {
-    //Invertia a direcao do mouse
+    // Invertia a direcao do mouse
     /**
      * return target + dist * vec3(cos(pitch)*sin(yaw),
         sin(pitch),
         cos(pitch) * cos(yaw)
         );
      */
-    return target + dist * vec3(
-      cos(pitch) * cos(yaw),
-      cos(pitch) * sin(yaw),
-      sin(pitch)
-    );
+    return target + dist * vec3(cos(pitch) * cos(yaw), cos(pitch) * sin(yaw),
+                                sin(pitch));
   }
 
   mat4 view() const {
@@ -77,23 +121,30 @@ bool dragging = false;
 double lastX = 0, lastY = 0;
 
 void mouseButtonCallback(GLFWwindow *w, int button, int action, int) {
-  if(button == GLFW_MOUSE_BUTTON_LEFT){
-    dragging = (action == GLFW_PRESS);
+  if (button == GLFW_MOUSE_BUTTON_LEFT) {
     glfwGetCursorPos(w, &lastX, &lastY);
+    if (action == GLFW_PRESS) {
+      dragging = !sliderPress(lastX, lastY);   // se clicou no slider, não orbita
+    } else {
+      sliderRelease();
+      dragging = false;
+    }
   }
-};
-
-void cursorCallback(GLFWwindow*, double x, double y){
-  if(dragging) {
-    camera.yaw -= float(x-lastX) * 0.005f;
-    camera.pitch += float(y-lastY) * 0.005f;
-    camera.pitch = glm::clamp(camera.pitch, -1.5f, 1.5f);
-  }
-  lastX=x, lastY=y;
 }
 
-void scrollCallback(GLFWwindow*, double, double yoff) {
-  camera.dist *= (yoff>0) ? 0.92f : 1.08f;
+void cursorCallback(GLFWwindow*, double x, double y) {
+  if (sliderDrag(x)) {
+    // o slider cuidou do movimento
+  } else if (dragging) {
+    camera.yaw   -= float(x - lastX) * 0.005f;
+    camera.pitch += float(y - lastY) * 0.005f;
+    camera.pitch  = glm::clamp(camera.pitch, -1.5f, 1.5f);
+  }
+  lastX = x; lastY = y;
+}
+
+void scrollCallback(GLFWwindow *, double, double yoff) {
+  camera.dist *= (yoff > 0) ? 0.92f : 1.08f;
   camera.dist = glm::clamp(camera.dist, 300.0f, 6000.0f);
 }
 
@@ -208,12 +259,7 @@ struct Engine {
     float aspect = float(fbw) / fbh;
 
     // Define a perspectiva da cena.
-    mat4 proj = perspective(
-      radians(50.0f),
-      aspect,
-      5.0f,
-      10000.0f
-    );
+    mat4 proj = perspective(radians(50.0f), aspect, 5.0f, 10000.0f);
 
     // aproxima a imagem sem mover a câmera.
     // proj = perspective(radians(25.0f), aspect, 5.0f, 10000.0f);
@@ -231,7 +277,8 @@ struct Engine {
   }
 };
 
-// Os dois vetores recebidos devem ter tamanho 1. L aponta da superficie para a luz.
+// Os dois vetores recebidos devem ter tamanho 1. L aponta da superficie para a
+// luz.
 static float lambert(vec3 normal, vec3 L) {
   return std::max(0.0f, dot(normal, L));
 }
@@ -268,8 +315,8 @@ vec3 calcularIluminacao(vec3 p, vec3 n, vec3 L, float light) {
   // ambiente = vec3(0.0f);
 
   // Usa Lambert, a força da luz e a resposta do material.
-  vec3 difusa = COR_BASE * COR_LUZ
-    * (INTENSIDADE_LUZ * DIFUSA_MATERIAL * light);
+  vec3 difusa =
+      COR_BASE * COR_LUZ * (INTENSIDADE_LUZ * DIFUSA_MATERIAL * light);
 
   // L ja aponta do ponto da superficie para a luz.
   vec3 luz = L;
@@ -299,18 +346,13 @@ vec3 calcularIluminacao(vec3 p, vec3 n, vec3 L, float light) {
   }
 
   // Usa a cor da luz na mancha de brilho.
-  vec3 brilho = COR_LUZ
-    * (INTENSIDADE_LUZ * ESPECULAR_MATERIAL * especular);
+  vec3 brilho = COR_LUZ * (INTENSIDADE_LUZ * ESPECULAR_MATERIAL * especular);
 
   // remove a mancha de brilho.
   // brilho = vec3(0.0f);
 
   // Soma os efeitos e mantém as cores entre 0 e 1.
-  return glm::clamp(
-    ambiente + difusa + brilho,
-    vec3(0.0f),
-    vec3(1.0f)
-  );
+  return glm::clamp(ambiente + difusa + brilho, vec3(0.0f), vec3(1.0f));
 }
 
 // ============================================================
@@ -351,11 +393,7 @@ struct Sphere {
           float phi = (k == 0) ? phi1 : phi2;
 
           // Calcula a direção do centro até a superfície.
-          vec3 n(
-            sin(phi) * cos(theta),
-            sin(phi) * sin(theta),
-            cos(phi)
-          );
+          vec3 n(sin(phi) * cos(theta), sin(phi) * sin(theta), cos(phi));
 
           // Calcula a posição do ponto na esfera.
           vec3 p = position + n * radius;
@@ -363,7 +401,7 @@ struct Sphere {
           // usa a mesma normal em toda a esfera.
           // n = vec3(-1.0f, 0.0f, 0.0f);
 
-          /* 
+          /*
           // Calcula a iluminação neste ponto.
           float light = usarLambert
             ? lambert(n, lightDir)
@@ -376,13 +414,13 @@ struct Sphere {
           // light = 0.1f + 0.9f * light;
 
           // Aplica a iluminação à cor da esfera.
-          vec3 ilu(1.0f, 1.0f, 1.0f); 
+          vec3 ilu(1.0f, 1.0f, 1.0f);
           vec3 c = (light > 0 ? (COR_BASE * (light*ilu)) : COR_BASE * light);
 
           // representa a direção das normais com cores.
           // c = (n + vec3(1.0f)) * 0.5f;
 
-          glColor3f(c.r, c.g, c.b); 
+          glColor3f(c.r, c.g, c.b);
           */
 
           vec3 L = normalize(lightPos - p);
@@ -438,11 +476,7 @@ struct Raio {
     // Limita o rastro ao ponto de impacto.
     float frente = glm::clamp(progresso, 0.0f, limite);
 
-    float cauda = glm::clamp(
-      progresso - RASTRO,
-      0.0f,
-      limite
-    );
+    float cauda = glm::clamp(progresso - RASTRO, 0.0f, limite);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -504,10 +538,7 @@ struct Raio {
     // passo = 0.0f;
 
     // Reinicia depois que o rastro desaparece.
-    progresso = fmod(
-      progresso + passo,
-      limite + RASTRO + 100.0f
-    );
+    progresso = fmod(progresso + passo, limite + RASTRO + 100.0f);
   }
 };
 
@@ -520,13 +551,17 @@ vector<Raio> raios;
 Engine engine;
 Sphere sphere(vec3(0.0f));
 
-//vec3 lightDir = normalize(vec3(1.0f, 0.0f, 0.0f));
+// vec3 lightDir = normalize(vec3(1.0f, 0.0f, 0.0f));
 vec3 lightPos(-800.0f, 0.0f, 0.0f);
+float luzAz = M_PI, luzEl = 0.3f, luzDist = 900.0f;
 
-enum class Cena {
-  Esfera,
-  Gaussiana
-};
+void calcularLuz() {
+  lightPos = luzDist * vec3(cos(luzEl) * cos(luzAz),
+                            cos(luzEl) * sin(luzAz),
+                            sin(luzEl));
+}
+
+enum class Cena { Esfera, Gaussiana };
 
 Cena cena = Cena::Esfera;
 
@@ -546,9 +581,7 @@ bool pausado = false;
 
 // Calcula a altura da superfície.
 float funcao(float x, float y) {
-  return ALTURA * exp(
-    -(x * x + y * y) / (ESCALA * ESCALA)
-  );
+  return ALTURA * exp(-(x * x + y * y) / (ESCALA * ESCALA));
 }
 
 // Calcula a inclinação na direção de X.
@@ -563,9 +596,7 @@ float derivadaY(float x, float y) {
 
 // Calcula a normal a partir das derivadas.
 vec3 normalFuncao(float x, float y) {
-  return normalize(
-    vec3(-derivadaX(x, y), -derivadaY(x, y), 1.0f)
-  );
+  return normalize(vec3(-derivadaX(x, y), -derivadaY(x, y), 1.0f));
 }
 
 struct PontoEstudo {
@@ -578,37 +609,23 @@ struct PontoEstudo {
 // Obtém o ponto, a normal e as direções do plano.
 PontoEstudo pontoEstudo() {
   if (cena == Cena::Esfera) {
-    vec3 n(
-      cos(pontoB) * cos(pontoA),
-      cos(pontoB) * sin(pontoA),
-      sin(pontoB)
-    );
+    vec3 n(cos(pontoB) * cos(pontoA), cos(pontoB) * sin(pontoA), sin(pontoB));
 
     vec3 u(-sin(pontoA), cos(pontoA), 0.0f);
 
-    return {
-      sphere.position + n * sphere.radius,
-      n,
-      u,
-      normalize(cross(n, u))
-    };
+    return {sphere.position + n * sphere.radius, n, u, normalize(cross(n, u))};
   }
 
   float x = pontoA * DOMINIO;
   float y = pontoB * DOMINIO;
 
-  return {
-    vec3(x, y, funcao(x, y)),
-    normalFuncao(x, y),
-    normalize(vec3(1.0f, 0.0f, derivadaX(x, y))),
-    normalize(vec3(0.0f, 1.0f, derivadaY(x, y)))
-  };
+  return {vec3(x, y, funcao(x, y)), normalFuncao(x, y),
+          normalize(vec3(1.0f, 0.0f, derivadaX(x, y))),
+          normalize(vec3(0.0f, 1.0f, derivadaY(x, y)))};
 }
 
 // Infinito indica que o raio não atingiu a superfície.
-float semImpacto() {
-  return numeric_limits<float>::infinity();
-}
+float semImpacto() { return numeric_limits<float>::infinity(); }
 
 // Calcula onde o raio atinge a esfera.
 float intersecaoEsfera(vec3 origem, vec3 direcao) {
@@ -622,8 +639,7 @@ float intersecaoEsfera(vec3 origem, vec3 direcao) {
 
   float b = 2.0f * dot(p, direcao);
 
-  float c =
-    dot(p, p) - sphere.radius * sphere.radius;
+  float c = dot(p, p) - sphere.radius * sphere.radius;
 
   float delta = b * b - 4.0f * a * c;
 
@@ -637,17 +653,15 @@ float intersecaoEsfera(vec3 origem, vec3 direcao) {
   float t2 = (-b + raiz) / (2.0f * a);
 
   // Escolhe o primeiro impacto à frente do raio.
-  float t = t1 >= 0.0f
-    ? t1
-    : (t2 >= 0.0f ? t2 : semImpacto());
+  float t = t1 >= 0.0f ? t1 : (t2 >= 0.0f ? t2 : semImpacto());
 
   return t * sqrt(a);
 }
 
 float intersecaoGeral(vec3 o, vec3 d) {
   const float passo = 2.0f;
-  for (float t = 0.0f; t< 3000.0f; t += passo) {
-    vec3 p = o+d*t;
+  for (float t = 0.0f; t < 3000.0f; t += passo) {
+    vec3 p = o + d * t;
     if (abs(p.x) <= DOMINIO && abs(p.y) <= DOMINIO && p.z <= funcao(p.x, p.y)) {
       return t;
     }
@@ -657,17 +671,11 @@ float intersecaoGeral(vec3 o, vec3 d) {
 
 // Usa a direção +X dos raios desta cena.
 float intersecaoGaussiana(vec3 origem) {
-  if (
-    abs(origem.y) > DOMINIO ||
-    origem.z <= 0.0f ||
-    origem.z > ALTURA
-  ) {
+  if (abs(origem.y) > DOMINIO || origem.z <= 0.0f || origem.z > ALTURA) {
     return semImpacto();
   }
 
-  float x2 =
-    -ESCALA * ESCALA * log(origem.z / ALTURA)
-    - origem.y * origem.y;
+  float x2 = -ESCALA * ESCALA * log(origem.z / ALTURA) - origem.y * origem.y;
 
   if (x2 < 0.0f) {
     return semImpacto();
@@ -698,18 +706,15 @@ void criarRaios() {
     for (int j = 0; j < 5; j++) {
       float y = -240.0f + i * 120.0f;
 
-      float z = cena == Cena::Esfera
-        ? -240.0f + j * 120.0f
-        : 30.0f + j * 45.0f;
+      float z = cena == Cena::Esfera ? -240.0f + j * 120.0f : 30.0f + j * 45.0f;
 
       vec3 origem = lightPos;
       vec3 alvo(0.0f, y, z);
       vec3 dir = normalize(alvo - origem);
 
       // Calcula a distância até a superfície.
-      float impacto = cena == Cena::Esfera
-        ? intersecaoEsfera(origem, dir)
-        : intersecaoGeral(origem, dir);
+      float impacto = cena == Cena::Esfera ? intersecaoEsfera(origem, dir)
+                                           : intersecaoGeral(origem, dir);
 
       // deixa os raios seguirem depois da superfície.
       // impacto = semImpacto();
@@ -719,25 +724,45 @@ void criarRaios() {
       float limite = atingiu ? impacto : 1700.0f;
 
       // Faz os rastros começarem em posições diferentes.
-      float inicio = fmod(
-        float(i * 113 + j * 157),
-        limite + RASTRO + 100.0f
-      );
+      float inicio = fmod(float(i * 113 + j * 157), limite + RASTRO + 100.0f);
 
       int idx = i * 5 + j;
       if (idx < (int)antigos.size()) {
         inicio = antigos[idx].progresso;
       }
 
-      raios.push_back({
-        origem,
-        dir,
-        limite,
-        inicio,
-        atingiu
-      });
+      raios.push_back({origem, dir, limite, inicio, atingiu});
     }
   }
+}
+
+void atualizarLuz() {
+  calcularLuz();
+  criarRaios();
+}
+
+Slider sliders[3] = {
+  {20, 20, 300, 20, -3.14159f, 3.14159f, &luzAz,   atualizarLuz},  // azimute
+  {20, 50, 300, 20,  0.05f,    1.5f,     &luzEl,   atualizarLuz},  // elevação
+  {20, 80, 300, 20,  300.0f,   1500.0f,  &luzDist, atualizarLuz},  // distância
+};
+
+// Devolve true se o clique foi em algum slider.
+bool sliderPress(double mx, double my) {
+  for (auto &s : sliders)
+    if (s.inside(mx, my)) { s.active = true; s.drag(mx); return true; }
+  return false;
+}
+
+// Devolve true se algum slider está sendo arrastado.
+bool sliderDrag(double mx) {
+  for (auto &s : sliders)
+    if (s.active) { s.drag(mx); return true; }
+  return false;
+}
+
+void sliderRelease() {
+  for (auto &s : sliders) s.active = false;
 }
 
 // Troca a superfície e recria os raios.
@@ -751,60 +776,53 @@ void selecionarCena(Cena nova) {
 }
 
 // Processa as teclas pressionadas.
-void keyCallback(
-  GLFWwindow *w,
-  int key,
-  int,
-  int action,
-  int
-) {
+void keyCallback(GLFWwindow *w, int key, int, int action, int) {
   if (action != GLFW_PRESS) {
     return;
   }
 
   switch (key) {
-    case GLFW_KEY_ESCAPE:
-      glfwSetWindowShouldClose(w, GLFW_TRUE);
-      break;
+  case GLFW_KEY_ESCAPE:
+    glfwSetWindowShouldClose(w, GLFW_TRUE);
+    break;
 
-    case GLFW_KEY_1:
-      selecionarCena(Cena::Esfera);
-      break;
+  case GLFW_KEY_1:
+    selecionarCena(Cena::Esfera);
+    break;
 
-    case GLFW_KEY_2:
-      selecionarCena(Cena::Gaussiana);
-      break;
+  case GLFW_KEY_2:
+    selecionarCena(Cena::Gaussiana);
+    break;
 
-    case GLFW_KEY_N:
-      mostrarNormal = !mostrarNormal;
-      break;
+  case GLFW_KEY_N:
+    mostrarNormal = !mostrarNormal;
+    break;
 
-    case GLFW_KEY_P:
-      mostrarPlano = !mostrarPlano;
-      break;
+  case GLFW_KEY_P:
+    mostrarPlano = !mostrarPlano;
+    break;
 
-    case GLFW_KEY_R:
-      mostrarRaios = !mostrarRaios;
-      break;
+  case GLFW_KEY_R:
+    mostrarRaios = !mostrarRaios;
+    break;
 
-    case GLFW_KEY_L:
-      usarLambert = !usarLambert;
-      break;
+  case GLFW_KEY_L:
+    usarLambert = !usarLambert;
+    break;
 
-    case GLFW_KEY_SPACE:
-      pausado = !pausado;
-      break;
+  case GLFW_KEY_SPACE:
+    pausado = !pausado;
+    break;
 
-    case GLFW_KEY_HOME:
-      camera = Camera{};
-      break;
+  case GLFW_KEY_HOME:
+    camera = Camera{};
+    break;
   }
 }
 
 // Move o ponto selecionado pelas setas do teclado.
 void moverPonto(float dt) {
-  float passo =
-    (cena == Cena::Esfera ? 1.0f : 0.6f) * dt;
+  float passo = (cena == Cena::Esfera ? 1.0f : 0.6f) * dt;
 
   if (glfwGetKey(engine.window, GLFW_KEY_LEFT) == GLFW_PRESS)
     pontoA -= passo;
@@ -831,9 +849,7 @@ void moverPonto(float dt) {
 // DESENHO DA GAUSSIANA E DO PLANO
 // ============================================================
 
-void vertice(vec3 p) {
-  glVertex3f(p.x, p.y, p.z);
-}
+void vertice(vec3 p) { glVertex3f(p.x, p.y, p.z); }
 
 void desenharLuz() {
   glPointSize(12.0f);
@@ -856,13 +872,11 @@ void desenharGaussiana() {
 
     for (int j = 0; j <= divisoes; j++) {
       for (int k = 0; k < 2; k++) {
-        float x =
-          -DOMINIO + 2.0f * DOMINIO * j / divisoes;
+        float x = -DOMINIO + 2.0f * DOMINIO * j / divisoes;
 
-        float y =
-          -DOMINIO + 2.0f * DOMINIO * (i + k) / faixas;
+        float y = -DOMINIO + 2.0f * DOMINIO * (i + k) / faixas;
 
-        /* 
+        /*
         vec3 n = normalFuncao(x, y);
 
         float light = usarLambert
@@ -875,7 +889,7 @@ void desenharGaussiana() {
         // c = (n + vec3(1.0f)) * 0.5f;
 
         glColor3f(c.r, c.g, c.b);
-        vertice(vec3(x, y, funcao(x, y))); 
+        vertice(vec3(x, y, funcao(x, y)));
         */
 
         vec3 n = normalFuncao(x, y);
@@ -1024,9 +1038,13 @@ int main() {
 
     desenharLuz();
 
+    int ww, wh;
+    glfwGetWindowSize(engine.window, &ww, &wh);
+    for (auto &s : sliders) s.draw(ww, wh);
+
     // Apresenta o quadro desenhado na janela.
     glfwSwapBuffers(engine.window);
-    
+
     // Processa eventos, como o fecho da janela.
     glfwPollEvents();
   }
